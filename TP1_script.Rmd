@@ -1,0 +1,454 @@
+---
+output:
+  html_document:
+  word_document: default
+  pdf_document:
+    keep_tex: yes
+    number_sections: yes
+    fig_caption: yes
+outp ut:
+  pdf_document:
+    toc: no
+    fig_caption: yes
+    number_sections: yes
+header-includes:
+  - \usepackage{pdfpages}
+  - \usepackage{tcolorbox}
+  - \usepackage{graphicx}
+---
+
+\includepdf{page_garde}
+\newpage
+\tableofcontents
+\newpage
+
+```{r setup, include=FALSE, results = 'hide'}
+knitr::opts_chunk$set(
+  root.dir = "C:/Users/LENOVO/Desktop/isep3/semestre2/Projet statistique sous R/TP 1",
+	echo = TRUE,
+	message = FALSE,
+	warning = FALSE
+  
+)
+```
+
+```{r packages needed}
+library(sf)
+library(labelled) # for general functions to work with labelled data
+library(tidyverse) # general wrangling
+library(readxl) # manipuler les fichiers excel
+library(gtsummary) # to demonstrate automatic use of variable labels in 
+library(ggstats)
+library(ggplot2)
+library(ggspatial)
+```
+
+```{r remove environment variables}
+
+rm(list = ls())
+here::here()
+```
+
+# \textbf {Préparation des données}
+## \textbf {Importation et mise en forme}
+- Importation
+```{r importation de la base de données ,  results='asis'}
+projet <- read_excel("Base_Projet.xlsx")
+
+```
+
+- La base de données contient \textcolor{orange}{`r ncol(projet)`} variables collectées sur \textcolor{orange}{`r nrow(projet)`} PME.
+
+- Il y'a \textcolor{orange}{`r sum(is.na(projet$key))`} valeurs manquantes sur la variable \textcolor{blue}{\textbf{key}}.
+
+## \textbf {Création de variables}
+- Renommage des variables et création de \textcolor{blue}{\textbf{sexe{\_}2}}
+
+```{r}
+projet <- projet %>% rename("region" = "q1",
+                            "departement"= "q2",
+                            "sexe" = "q23") %>%
+                    mutate(sexe_2 = if_else(sexe == "Femme",1,0))
+```
+
+- Data.frame \textcolor{blue}{\textbf{langues}}
+```{r}
+langues <- projet %>%
+  select("key", starts_with("q24a_")) %>%
+  mutate(parle = sum(c_across(2:ncol(.)))) %>%
+  select("key", "parle")
+
+```
+
+- Merge des data.frame \textcolor{blue}{\textbf{projet}} et \textcolor{blue}{\textbf{langues}}
+
+```{r}
+length(unique(projet$key)) == nrow(projet)
+
+projet <- left_join(projet, langues, by = "key")
+```
+# \textbf {Analyses descriptives}
+- traitement de la variable age : 
+```{r}
+projet <- projet %>% mutate (q24 = if_else(q24 >150, mean(q24 <= 150 , na.rm = T), q24))
+```
+
+- fonction univarie()
+
+
+
+```{r}
+univarie <- function(data, var_cont, var_cat, stat) {
+ data <- data
+  var <- c(var_cont,var_cat)
+  tbl <- data %>% tbl_summary(include = all_of(var) ,
+                     statistic = list( 
+                       all_continuous() ~ paste0(stat[1], ": {" ,stat[1],"} ", stat[2], ": {" ,stat[2],"}"),
+                       
+                       all_categorical() ~ "{p} %"),
+                     sort = all_categorical() ~ "frequency"
+                     )
+  
+  
+  
+ for (i in  var_cont){
+   print( ggplot(data) +
+  aes(x = get(i)) +
+  geom_density(adjust = .5) +
+  scale_x_continuous(limits = c(min(data[[i]]), max(data[[i]])))+
+      xlab(i) +
+  ylab("Effectifs"))
+    
+    print(ggplot(data) +
+  aes(x = get(i)) +
+  geom_histogram(
+    fill ="lightblue", 
+    colour = "black", 
+    binwidth = 0.5
+  ) +
+  xlab(i) +
+  ylab("Effectifs"))
+  }
+  
+  for (i in  var_cat){
+    print(ggplot(data) +
+  aes(x = forcats::fct_infreq(get(i)), 
+      y = after_stat(prop), by = 1) +
+  geom_bar(stat = "prop", 
+           fill = "#4477AA", colour = "black") +
+  geom_text(
+    aes(label = after_stat(prop) |> 
+          scales::percent(accuracy = .1)),
+    stat = "prop",
+    nudge_y = .02
+  ) +
+  theme_minimal() +
+  theme(
+    panel.grid = element_blank(),
+    axis.text.y = element_blank()
+  ) +
+  xlab(NULL) + ylab(NULL) +
+  ggtitle(i))
+  }
+  
+  return(tbl)
+}
+
+
+```
+
+
+
+
+
+
+- application 
+```{r}
+var_cat <- c("sexe", "q25", "q12")
+var_cont <- c("q24")
+
+stat <- c("mean", "sd")
+a <- univarie(projet, var_cont, var_cat , stat )
+ a
+
+```
+
+
+
+- fonction bivarie()
+```{r}
+bivarie <- function(data, var1, var2){
+   ggplot(data) +
+  aes(
+    x = var1,
+    y = after_stat(prop),
+    fill = var2, 
+    by = as_factor(as.character(var2)),
+    label = scales::percent(after_stat(prop), accuracy = 1)
+  ) +
+  geom_bar(
+    stat = "prop", 
+    position = position_dodge(.9)
+  ) +
+  geom_text(
+    aes(y = after_stat(prop) - 0.01),
+    stat = "prop", 
+    position = position_dodge(.9),
+    vjust = "top"
+  ) +
+  scale_y_continuous(labels = scales::percent)+
+
+  theme_light() +
+  xlab("") +
+  ylab("") +
+  labs(fill = "") +
+  ggtitle(paste0(var1, " selon " , var2)) +
+  theme(
+    panel.grid = element_blank(),
+    panel.border = element_blank(),
+    axis.text.y = element_blank(),
+    axis.ticks = element_blank(),
+    legend.position = "top"
+  ) +
+  scale_fill_brewer()
+}
+```
+
+- application
+```{r}
+projet %>% bivarie( projet$q12, projet$sexe)
+projet %>% bivarie( projet$q25, projet$sexe)
+
+```
+```{r}
+# type 0 : 2 variable catégorielles, 1 : 2 variables continues, 2 : continue et catégorielle
+bivarie2 <- function(data, var1, var2,type){
+  ## type 0
+  if(type == 0){
+    # tableau 
+  tbl <- data %>% 
+  tbl_summary(
+    include = all_of(var1),
+    by = var2
+  ) %>% 
+  add_p()
+    
+    # graphique
+   print( ggplot(data) +
+  aes(
+    x = get(var1),
+    y = ..prop..,
+    fill = get(var2), 
+    label = scales::percent(..prop.., accuracy = 1)
+  ) +
+  geom_bar(
+    aes(y = ..prop..),
+    stat = "prop", 
+    position = position_dodge(.9)
+  ) +
+  geom_text(
+    aes(y = ..prop.. - 0.01, label = scales::percent(..prop.., accuracy = 1)),
+    stat = "prop", 
+    position = position_dodge(.9),
+    vjust = "top"
+  ) +
+  scale_y_continuous(labels = scales::percent) +
+
+  theme_light() +
+  xlab("") +
+  ylab("") +
+  labs(fill = "") +
+  ggtitle(paste0(var1, " selon ", var2)) +
+  theme(
+    panel.grid = element_blank(),
+    panel.border = element_blank(),
+    axis.text.y = element_blank(),
+    axis.ticks = element_blank(),
+    legend.position = "top"
+  ) +
+  scale_fill_brewer())
+    
+  
+  }
+  
+  ## type 1
+  if(type == 1){
+    ## courbe 
+    print(ggplot(data) +
+  aes(x = get(var1), y = get(var2)) +
+  geom_smooth(method = "lm") +
+  geom_point(colour = "blue", alpha = .25) +
+  geom_rug() +
+  theme_light())
+    
+    ## tableau de regression
+    m <- lm(get(var1) ~ get(var2), data = data)
+    #summary(m)
+    tbl <- m |> 
+  tbl_regression() |> 
+  add_glance_source_note()
+  }
+  
+  ## type 2
+  if(type == 2){
+    ## graphique
+    print(ggplot(data) +
+  aes(x = get(var1), y = get(var2)) +
+  geom_boxplot(fill = "lightblue") +
+  theme_light()+
+    ggtitle(paste0(var1, " selon ", var2)))
+    
+    ## tableau
+    tbl <- data |> 
+  tbl_summary(
+    include = all_of(var1),
+    by = var2,
+    statistic = all_continuous() ~ "{mean} ({sd})",
+    digits = all_continuous() ~ c(1, 1)
+  ) |> 
+  add_overall(last = TRUE)
+  }
+  return(tbl)
+}
+```
+
+```{r}
+ggplot(projet) +
+  aes(x = q24, y = sexe) +
+  geom_boxplot(fill = "lightblue") +
+  theme_light()
+```
+
+```{r application bivarie2}
+b <- projet %>% bivarie2("q24", "sexe", 2)
+print(b)
+```
+
+```{r}
+ggplot(projet) +
+  aes(
+    x = q12,
+    y = after_stat(prop),
+    fill = sexe, 
+    by = as_factor(sexe),
+    label = scales::percent(after_stat(prop), accuracy = 1)
+  ) +
+  geom_bar(
+    stat = "prop", 
+    position = position_dodge(.9)
+  ) +
+  geom_text(
+    aes(y = after_stat(prop) - 0.01),
+    stat = "prop", 
+    position = position_dodge(.9),
+    vjust = "top"
+  ) +
+  scale_y_continuous(labels = scales::percent)+
+
+  theme_light() +
+  xlab("") +
+  ylab("") +
+  labs(fill = "") +
+  ggtitle(paste0("q12", " selon " , "sexe")) +
+  theme(
+    panel.grid = element_blank(),
+    panel.border = element_blank(),
+    axis.text.y = element_blank(),
+    axis.ticks = element_blank(),
+    legend.position = "top"
+  ) +
+  scale_fill_brewer()
+```
+
+
+
+# \textbf {Un peu de cartographie}
+-Transformation en données géographiques 
+```{r}
+projet_map <- st_as_sf(projet, coords = c("gps_menlongitude", "gps_menlatitude"),  crs = 4326)
+class(projet_map)
+```
+- Retrouver le code : 
+```{r}
+
+ggplot(data = projet_map) +
+  geom_sf(aes(color = sexe)) +  
+  labs(title = "Répartition géographique des PME", 
+       x = "Longitude", y = "Latitude",
+       color = "Sexe") +  
+  annotation_scale(location = "br", line_width = .5) +
+  annotation_north_arrow(location = "bl", height = unit(0.7, "cm"), width = unit(0.7, "cm"))+
+  theme_minimal()  
+  
+
+```
+- Importation de SEN_adm et representation suivant les niveaux 
+```{r}
+SEN_adm0 <- st_read("data/gadm41_SEN_0.shp")
+SEN_adm1 <- st_read("data/gadm41_SEN_1.shp")
+SEN_adm2 <- st_read("data/gadm41_SEN_2.shp")
+SEN_adm3 <- st_read("data/gadm41_SEN_3.shp")
+
+ggplot(data = SEN_adm0) +
+  geom_sf(fill = "pink") +  
+  labs(title = "Carte du Sénégal", 
+       x = "Longitude", y = "Latitude") +  
+  annotation_scale(location = "br", line_width = .5) +
+  annotation_north_arrow(location = "bl", height = unit(0.7, "cm"), width = unit(0.7, "cm"))+
+  theme_minimal() 
+
+ggplot(data = SEN_adm1) +
+  geom_sf(fill = "pink") +  
+  labs(title = "Carte des régions du Sénégal", 
+       x = "Longitude", y = "Latitude") +  
+  annotation_scale(location = "br", line_width = .5) +
+  annotation_north_arrow(location = "bl", height = unit(0.7, "cm"), width = unit(0.7, "cm"))+
+  theme_minimal() 
+
+ggplot(data = SEN_adm2) +
+  geom_sf(fill = "pink") +  
+  labs(title = "Carte des départements du Sénégal", 
+       x = "Longitude", y = "Latitude") +  
+  annotation_scale(location = "br", line_width = .5) +
+  annotation_north_arrow(location = "bl", height = unit(0.7, "cm"), width = unit(0.7, "cm"))+
+  theme_minimal()
+
+ggplot(data = SEN_adm3) +
+  geom_sf(fill = "pink") +  
+  labs(title = "Carte des communes du Sénégal", 
+       x = "Longitude", y = "Latitude") +  
+  annotation_scale(location = "br", line_width = .5) +
+  annotation_north_arrow(location = "bl", height = unit(0.7, "cm"), width = unit(0.7, "cm"))+
+  theme_minimal() 
+```
+- Représentation spatiale des PME suivant le sexe : 
+```{r}
+ggplot() +
+  geom_sf(data = SEN_adm1, col = "pink" , fill = "#E3DEBF" )+
+  geom_sf(data = projet_map, aes(color = sexe)) +  
+  labs(title = "Répartition géographique des PME", 
+       x = "Longitude", y = "Latitude",
+       color = "Sexe") +  
+  annotation_scale(location = "br", line_width = .5) +
+  annotation_north_arrow(location = "bl", height = unit(0.7, "cm"), width = unit(0.7, "cm"))+
+  theme_minimal()  
+```
+
+- Représentation spatiale des PME suivant le niveau d'instruction : 
+```{r}
+ggplot() +
+  geom_sf(data = SEN_adm1, col = "pink" , fill = "#E3DEBF" )+
+  geom_sf(data = projet_map, aes(color = q25)) +  
+  labs(title = "Répartition géographique des PME", 
+       x = "Longitude", y = "Latitude",
+       color = "Niveau d'instruction") +  
+  annotation_scale(location = "br", line_width = .5) +
+  annotation_north_arrow(location = "bl", height = unit(0.7, "cm"), width = unit(0.7, "cm"))+
+  theme_minimal()  
+```
+
+
+
+
+
+
